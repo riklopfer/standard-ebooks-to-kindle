@@ -1,0 +1,26 @@
+[project]
+name = "standard-ebooks-to-kindle"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Russell Klopfer", email = "russell@kloper.us" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "rich>=15.0.0",
+    "typer>=0.29.2",
+]
+
+[project.scripts]
+standard-ebooks-to-kindle = "standard_ebooks_to_kindle:app"
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.6",
+    "ty>=0.0.107",
+]

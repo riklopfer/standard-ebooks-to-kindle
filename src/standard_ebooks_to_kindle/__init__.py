@@ -6,7 +6,7 @@ from typing import Annotated, Self
 from zipfile import ZipFile
 
 import typer
-from rich import progress
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 
 app = typer.Typer()
 
@@ -48,32 +48,53 @@ class KindlePaths:
         else:
             return False
 
-        if not force and target_path.exists() and target_path.stat().st_mtime >= file.stat().st_mtime:
+        if (
+            not force
+            and target_path.exists()
+            and target_path.stat().st_mtime >= file.stat().st_mtime
+        ):
             return False
 
         shutil.copyfile(file, target_path)
         return True
 
 
-def copy_to_kindle(source: Path, kindle: KindlePaths, force: bool):
+def mk_pbar() -> Progress:
+    return Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(bar_width=None),
+        MofNCompleteColumn(),
+        expand=True,
+    )
+
+
+def _copy_to_kindle(source: Path, kindle: KindlePaths, force: bool, _desc: str = ""):
     kindle.prepare(force)
     all_files = [f for f in source.glob("**/*") if f.is_file()]
-    for file in progress.track(all_files, total=len(all_files), description="Copying"):
-        if file.suffix == ".zip":
-            with TemporaryDirectory() as tmp_dir:
-                ZipFile(file).extractall(tmp_dir)
-                copy_to_kindle(Path(tmp_dir), kindle=kindle, force=force)
-        else:
-            kindle.copy_file(file, force)
+
+    with mk_pbar() as pbar:
+        for file in pbar.track(
+            all_files, total=len(all_files), description=_desc or f"{source}"
+        ):
+            if file.suffix == ".zip":
+                with TemporaryDirectory() as tmp_dir:
+                    ZipFile(file).extractall(tmp_dir)
+                    _copy_to_kindle(
+                        Path(tmp_dir), kindle=kindle, force=force, _desc=file.name
+                    )
+            else:
+                kindle.copy_file(file, force)
 
 
 @app.command()
 def main(
     source: Annotated[Path, typer.Argument(help="Path containing downloaded ebooks")],
-    kindle_root: Annotated[Path, typer.Argument(help="Kindle mount point")] = Path("/Volumes/Kindle"),
+    kindle_root: Annotated[Path, typer.Argument(help="Kindle mount point")] = Path(
+        "/Volumes/Kindle"
+    ),
     force: Annotated[bool, typer.Option(help="Force directory creation")] = False,
 ) -> None:
-    copy_to_kindle(source=source, kindle=KindlePaths(kindle_root), force=force)
+    _copy_to_kindle(source=source, kindle=KindlePaths(kindle_root), force=force)
 
 
 if __name__ == "__main__":

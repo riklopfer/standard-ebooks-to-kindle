@@ -92,7 +92,12 @@ def main(
     kindle_root: Annotated[Path, typer.Argument(help="Kindle mount point")] = Path(
         "/Volumes/Kindle"
     ),
-    force: Annotated[bool, typer.Option(help="Force directory creation")] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            help="Force directory creation. Will attempt to create kindle_root if it doesn't exist."
+        ),
+    ] = False,
 ) -> None:
     _copy_to_kindle(source=source, kindle=KindlePaths(kindle_root), force=force)
 

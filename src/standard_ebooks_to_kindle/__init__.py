@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import shutil
 from dataclasses import dataclass
 from functools import cache
@@ -8,12 +9,15 @@ from typing import Annotated, NamedTuple, Self
 from zipfile import ZipFile
 
 import typer
+from rich.logging import RichHandler
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 
 app = typer.Typer()
 
 __all__ = ["app"]
 
+
+_logger = logging.getLogger(__name__)
 
 _BLOCK_SIZE = 100
 
@@ -61,18 +65,18 @@ class KindlePaths:
     def thumbnails_dir(self) -> Path:
         return self.root / "system/thumbnails"
 
-    def prepare(self, force: bool) -> Self:
-        if force:
-            self.books_dir.mkdir(parents=True, exist_ok=True)
-            self.thumbnails_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            if not self.books_dir.is_dir():
-                raise NotADirectoryError(self.books_dir)
-            if not self.thumbnails_dir.is_dir():
-                raise NotADirectoryError(self.thumbnails_dir)
+    def prepare(self, dry_run: bool) -> Self:
+        if dry_run:
+            return self
+
+        if not self.books_dir.is_dir():
+            raise NotADirectoryError(self.books_dir)
+        if not self.thumbnails_dir.is_dir():
+            raise NotADirectoryError(self.thumbnails_dir)
+
         return self
 
-    def copy_file(self, file: Path, force: bool) -> bool:
+    def copy_file(self, file: Path, dry_run: bool) -> bool:
         file = file.resolve()
         if not file.is_file():
             return False
@@ -84,10 +88,13 @@ class KindlePaths:
         else:
             return False
 
-        if not (force or _should_copy(file, target_path)):
+        if not _should_copy(file, target_path):
             return False
 
-        shutil.copyfile(file, target_path)
+        if dry_run:
+            _logger.warning(f"cp {file} -> {target_path}")
+        else:
+            shutil.copyfile(file, target_path)
         return True
 
 
@@ -100,8 +107,8 @@ def mk_pbar() -> Progress:
     )
 
 
-def _copy_to_kindle(source: Path, kindle: KindlePaths, force: bool, _desc: str = ""):
-    kindle.prepare(force)
+def _copy_to_kindle(source: Path, kindle: KindlePaths, dry_run: bool, _desc: str = ""):
+    kindle.prepare(dry_run)
     all_files = [f for f in source.glob("**/*") if f.is_file()]
 
     with mk_pbar() as pbar:
@@ -112,10 +119,10 @@ def _copy_to_kindle(source: Path, kindle: KindlePaths, force: bool, _desc: str =
                 with TemporaryDirectory() as tmp_dir:
                     ZipFile(file).extractall(tmp_dir)
                     _copy_to_kindle(
-                        Path(tmp_dir), kindle=kindle, force=force, _desc=file.name
+                        Path(tmp_dir), kindle=kindle, dry_run=dry_run, _desc=file.name
                     )
             else:
-                kindle.copy_file(file, force)
+                kindle.copy_file(file, dry_run)
 
 
 @app.command()
@@ -124,14 +131,19 @@ def main(
     kindle_root: Annotated[Path, typer.Argument(help="Kindle mount point")] = Path(
         "/Volumes/Kindle"
     ),
-    force: Annotated[
+    dry_run: Annotated[
         bool,
         typer.Option(
-            help="Force directory creation. Will attempt to create kindle_root if it doesn't exist."
+            help="Simulate the copy without writing any files or creating directories."
         ),
     ] = False,
 ) -> None:
-    _copy_to_kindle(source=source, kindle=KindlePaths(kindle_root), force=force)
+
+    logging.basicConfig(
+        level="WARNING", format="%(message)s", datefmt="[%X]", handlers=[RichHandler()]
+    )
+
+    _copy_to_kindle(source=source, kindle=KindlePaths(kindle_root), dry_run=dry_run)
 
 
 if __name__ == "__main__":

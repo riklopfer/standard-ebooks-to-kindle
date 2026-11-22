@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Annotated, NamedTuple, Self
 from zipfile import ZipFile
 
+import rich
 import typer
 from rich.logging import RichHandler
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
@@ -95,34 +96,41 @@ class KindlePaths:
             _logger.warning(f"cp {file} -> {target_path}")
         else:
             shutil.copyfile(file, target_path)
+
         return True
 
 
-def mk_pbar() -> Progress:
+def mk_pbar(transient: bool) -> Progress:
     return Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(bar_width=None),
         MofNCompleteColumn(),
         expand=True,
+        transient=transient,
     )
 
 
-def _copy_to_kindle(source: Path, kindle: KindlePaths, dry_run: bool, _desc: str = ""):
+def _copy_to_kindle(
+    source: Path, kindle: KindlePaths, dry_run: bool, _desc: str = ""
+) -> int:
     kindle.prepare(dry_run)
     all_files = [f for f in source.glob("**/*") if f.is_file()]
 
-    with mk_pbar() as pbar:
+    files_copied = 0
+    with mk_pbar(transient=bool(_desc)) as pbar:
         for file in pbar.track(
             all_files, total=len(all_files), description=_desc or f"{source}"
         ):
             if file.suffix == ".zip":
                 with TemporaryDirectory() as tmp_dir:
                     ZipFile(file).extractall(tmp_dir)
-                    _copy_to_kindle(
+                    files_copied += _copy_to_kindle(
                         Path(tmp_dir), kindle=kindle, dry_run=dry_run, _desc=file.name
                     )
             else:
-                kindle.copy_file(file, dry_run)
+                files_copied += kindle.copy_file(file, dry_run)
+
+    return files_copied
 
 
 @app.command()
@@ -143,7 +151,10 @@ def main(
         level="WARNING", format="%(message)s", datefmt="[%X]", handlers=[RichHandler()]
     )
 
-    _copy_to_kindle(source=source, kindle=KindlePaths(kindle_root), dry_run=dry_run)
+    files_copied = _copy_to_kindle(
+        source=source, kindle=KindlePaths(kindle_root), dry_run=dry_run
+    )
+    rich.print(f"Copied {files_copied} files to {kindle_root}")
 
 
 if __name__ == "__main__":

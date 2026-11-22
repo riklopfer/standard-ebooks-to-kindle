@@ -1,8 +1,10 @@
+import hashlib
 import shutil
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Annotated, Self
+from typing import Annotated, NamedTuple, Self
 from zipfile import ZipFile
 
 import typer
@@ -11,6 +13,40 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
 app = typer.Typer()
 
 __all__ = ["app"]
+
+
+_BLOCK_SIZE = 100
+
+
+class FingerPrint(NamedTuple):
+    size: int
+    sha1: str
+
+
+@cache
+def _finger_print(path: Path) -> FingerPrint:
+    digest = hashlib.sha1()
+    size = 0
+    with path.open("rb") as fp:
+        while data := fp.read(_BLOCK_SIZE):
+            size += len(data)
+            digest.update(data)
+    return FingerPrint(size=size, sha1=digest.hexdigest())
+
+
+def _should_copy(source: Path, target: Path) -> bool:
+    if not target.exists():
+        return True
+
+    if source.name != target.name:
+        return True
+
+    source_content, target_content = _finger_print(source), _finger_print(target)
+
+    if source_content == target_content:
+        return False
+
+    return source_content.size > target_content.size
 
 
 @dataclass(frozen=True)
@@ -48,11 +84,7 @@ class KindlePaths:
         else:
             return False
 
-        if (
-            not force
-            and target_path.exists()
-            and target_path.stat().st_mtime >= file.stat().st_mtime
-        ):
+        if not (force or _should_copy(file, target_path)):
             return False
 
         shutil.copyfile(file, target_path)

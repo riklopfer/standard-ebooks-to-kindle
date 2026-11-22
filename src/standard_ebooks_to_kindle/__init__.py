@@ -12,6 +12,7 @@ import rich
 import typer
 from rich.logging import RichHandler
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
+from rich.table import Table
 
 app = typer.Typer()
 
@@ -54,8 +55,11 @@ def _should_copy(source: Path, target: Path) -> bool:
     return source_content.size > target_content.size
 
 
+BOOK_EXT = ".azw3"
+
+
 @dataclass(frozen=True)
-class KindlePaths:
+class KindleMount:
     root: Path
 
     @property
@@ -82,7 +86,7 @@ class KindlePaths:
         if not file.is_file():
             return False
 
-        if file.suffix == ".azw3":
+        if file.suffix == BOOK_EXT:
             target_path = self.books_dir / file.name
         elif file.suffix == ".jpg":
             target_path = self.thumbnails_dir / file.name
@@ -111,12 +115,12 @@ def mk_pbar(transient: bool) -> Progress:
 
 
 def _copy_to_kindle(
-    source: Path, kindle: KindlePaths, dry_run: bool, _desc: str = ""
-) -> int:
+    source: Path, kindle: KindleMount, dry_run: bool, _desc: str = ""
+) -> list[Path]:
     kindle.prepare(dry_run)
     all_files = [f for f in source.glob("**/*") if f.is_file()]
 
-    files_copied = 0
+    files_copied = []
     with mk_pbar(transient=bool(_desc)) as pbar:
         for file in pbar.track(
             all_files, total=len(all_files), description=_desc or f"{source}"
@@ -128,17 +132,20 @@ def _copy_to_kindle(
                         Path(tmp_dir), kindle=kindle, dry_run=dry_run, _desc=file.name
                     )
             else:
-                files_copied += kindle.copy_file(file, dry_run)
+                if kindle.copy_file(file, dry_run):
+                    files_copied.append(file)
 
     return files_copied
 
 
 @app.command()
 def main(
-    source: Annotated[Path, typer.Argument(help="Path containing downloaded ebooks")],
-    kindle_root: Annotated[Path, typer.Argument(help="Kindle mount point")] = Path(
-        "/Volumes/Kindle"
-    ),
+    ebooks: Annotated[
+        Path, typer.Argument(help="Path containing downloaded ebook files.")
+    ],
+    kindle_root: Annotated[
+        Path, typer.Option("--kindle", help="Kindle mount point.")
+    ] = Path("/Volumes/Kindle"),
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -152,9 +159,14 @@ def main(
     )
 
     files_copied = _copy_to_kindle(
-        source=source, kindle=KindlePaths(kindle_root), dry_run=dry_run
+        source=ebooks, kindle=KindleMount(kindle_root), dry_run=dry_run
     )
-    rich.print(f"Copied {files_copied} files to {kindle_root}")
+    rich.print(f"Copied {len(files_copied)} files to {kindle_root}")
+    table = Table("#", "Book", title="Copied")
+    for x, path in enumerate(filter(lambda _: _.suffix == BOOK_EXT, files_copied)):
+        table.add_row(str(x + 1), path.stem)
+    if table.row_count:
+        rich.print(table)
 
 
 if __name__ == "__main__":
